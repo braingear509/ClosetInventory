@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plato's Closet Inventory Tool</title>
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        #scanner-container { width: 100%; height: 200px; border: 1px solid #ccc; }
+        #interactive.viewport { width: 100%; height: 100%; }
+        select, input, button { margin: 10px 0; padding: 5px; width: 100%; }
+        #results { margin-top: 20px; }
+        #permission-error { color: red; display: none; }
+    </style>
+</head>
+<body>
+    <h2>Plato's Closet Inventory Tool</h2>
+    
+    <!-- Category and Subcategory Selection -->
+    <label for="category">Select Category:</label>
+    <select id="category" onchange="updateSubcategories()">
+        <option value="">Select Category</option>
+        <option value="WT">Women's Tops</option>
+        <option value="WB">Women's Bottoms</option>
+        <option value="WD">Women's Dresses</option>
+        <option value="WO">Women's Outerwear</option>
+        <option value="WA">Women's Athleticwear</option>
+        <option value="Shoes">Shoes</option>
+        <option value="MT">Men's Tops</option>
+        <option value="MB">Men's Bottoms</option>
+        <option value="MO">Men's Outerwear</option>
+        <option value="MA">Men's Athleticwear</option>
+    </select>
+
+    <label for="subcategory">Select Subcategory:</label>
+    <select id="subcategory">
+        <option value="">Select Subcategory</option>
+    </select>
+
+    <!-- Barcode Scanner -->
+    <div id="scanner-container">
+        <div id="interactive" class="viewport"></div>
+    </div>
+    <button onclick="startScanner()">Start Scanner</button>
+    <div id="permission-error">Permission denied. Please allow camera access in settings or ensure you're on HTTPS/localhost.</div>
+
+    <!-- Item Details -->
+    <label for="upc">UPC Code:</label>
+    <input type="text" id="upc" readonly>
+
+    <label for="price">Price ($):</label>
+    <input type="number" id="price" step="0.01" placeholder="Enter price">
+
+    <label for="dateAdded">Date Added (YYYY-MM-DD):</label>
+    <input type="date" id="dateAdded" required>
+
+    <label for="sku">SKU:</label>
+    <input type="text" id="sku" placeholder="Enter SKU">
+
+    <button onclick="countItem()">Count Item</button>
+
+    <!-- Results -->
+    <div id="results">
+        <h3>Inventory Summary</h3>
+        <p>Total Items: <span id="totalItems">0</span></p>
+        <p>Total Inventory Value: $<span id="totalValue">0.00</span></p>
+        <div id="categorySummary"></div>
+    </div>
+
+    <button onclick="exportToCSV()">Export to CSV</button>
+
+    <script>
+        // Category to Subcategory Mapping
+        const subcategories = {
+            WT: ["Tanks", "Tees", "Long Sleeve", "Short Sleeve"],
+            WB: ["Denim", "Shorts", "Skirts"],
+            WD: ["Short", "Long"],
+            WO: ["Light", "Heavy"],
+            WA: ["Short Sleeve", "Long Sleeve", "Jackets", "Pants", "Tanks"],
+            Shoes: ["Athletic", "Casual", "Dress"],
+            MT: ["Short Sleeve", "Long Sleeve"],
+            MB: [],
+            MO: [],
+            MA: ["Short Sleeve", "Long Sleeve", "Jackets", "Pants", "Tanks"]
+        };
+
+        // Inventory Storage
+        let inventory = JSON.parse(localStorage.getItem('inventory')) || [];
+
+        // Update Subcategories Dropdown
+        function updateSubcategories() {
+            const category = document.getElementById('category').value;
+            const subcategorySelect = document.getElementById('subcategory');
+            subcategorySelect.innerHTML = '<option value="">Select Subcategory</option>';
+
+            if (category && subcategories[category]) {
+                subcategories[category].forEach(sub => {
+                    const option = document.createElement('option');
+                    option.value = sub;
+                    option.textContent = sub;
+                    subcategorySelect.appendChild(option);
+                });
+                subcategorySelect.disabled = subcategories[category].length === 0;
+            } else {
+                subcategorySelect.disabled = true;
+            }
+        }
+
+        // Barcode Scanner with Permission Handling
+        let quaggaInitialized = false;
+        function startScanner() {
+            if (quaggaInitialized) {
+                Quagga.start();
+                return;
+            }
+
+            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+                .then(() => {
+                    Quagga.init({
+                        inputStream: {
+                            name: "Live",
+                            type: "LiveStream",
+                            target: document.querySelector('#interactive'),
+                            constraints: {
+                                width: 640,
+                                height: 480,
+                                facingMode: "environment"
+                            }
+                        },
+                        decoder: {
+                            readers: ["upc_reader"]
+                        }
+                    }, function(err) {
+                        if (err) {
+                            console.error(err);
+                            document.getElementById('permission-error').style.display = 'block';
+                            return;
+                        }
+                        Quagga.start();
+                        quaggaInitialized = true;
+                    });
+
+                    Quagga.onDetected(function(data) {
+                        const code = data.codeResult.code;
+                        document.getElementById('upc').value = code;
+
+                        // Simulate tag parsing (e.g., WT L, $10.00, SKU: 2268691)
+                        const category = "WT";
+                        const subcategory = "Long Sleeve";
+                        const price = 10.00;
+                        const sku = "2268691";
+
+                        document.getElementById('category').value = category;
+                        updateSubcategories();
+                        document.getElementById('subcategory').value = subcategory;
+                        document.getElementById('price').value = price;
+                        document.getElementById('sku').value = sku;
+
+                        Quagga.stop();
+                    });
+                })
+                .catch(err => {
+                    console.error("Camera access error:", err);
+                    document.getElementById('permission-error').style.display = 'block';
+                });
+        }
+
+        // Count Item
+        function countItem() {
+            const category = document.getElementById('category').value;
+            const subcategory = document.getElementById('subcategory').value;
+            const upc = document.getElementById('upc').value;
+            const price = parseFloat(document.getElementById('price').value);
+            const dateAdded = document.getElementById('dateAdded').value;
+            const sku = document.getElementById('sku').value;
+
+            if (!category || !price || !dateAdded || !sku) {
+                alert("Please fill in all required fields.");
+                return;
+            }
+
+            const item = {
+                category,
+                subcategory: subcategory || "N/A",
+                upc,
+                price,
+                dateAdded,
+                sku
+            };
+
+            inventory.push(item);
+            localStorage.setItem('inventory', JSON.stringify(inventory));
+            updateSummary();
+        }
+
+        // Update Summary
+        function updateSummary() {
+            const totalItems = inventory.length;
+            const totalValue = inventory.reduce((sum, item) => sum + item.price, 0).toFixed(2);
+
+            document.getElementById('totalItems').textContent = totalItems;
+            document.getElementById('totalValue').textContent = totalValue;
+
+            const categorySummary = {};
+            inventory.forEach(item => {
+                const key = `${item.category} - ${item.subcategory}`;
+                if (!categorySummary[key]) {
+                    categorySummary[key] = { count: 0, totalValue: 0, items: [] };
+                }
+                categorySummary[key].count++;
+                categorySummary[key].totalValue += item.price;
+                categorySummary[key].items.push(item);
+            });
+
+            let summaryHtml = "<h4>Category Breakdown</h4>";
+            for (const [key, data] of Object.entries(categorySummary)) {
+                const avgPrice = (data.totalValue / data.count).toFixed(2);
+                const avgAge = data.items.reduce((sum, item) => {
+                    const added = new Date(item.dateAdded);
+                    const today = new Date();
+                    const age = (today - added) / (1000 * 60 * 60 * 24);
+                    return sum + age;
+                }, 0) / data.count;
+
+                summaryHtml += `
+                    <p><b>${key}</b>: ${data.count} items, Total Value: $${data.totalValue.toFixed(2)}, 
+                    Avg Price: $${avgPrice}, Avg Age: ${avgAge.toFixed(1)} days</p>
+                `;
+            }
+            document.getElementById('categorySummary').innerHTML = summaryHtml;
+        }
+
+        // Export to CSV
+        function exportToCSV() {
+            let csv = "Category,Subcategory,UPC,SKU,Price,Date Added,Age (Days)\n";
+            inventory.forEach(item => {
+                const added = new Date(item.dateAdded);
+                const today = new Date();
+                const age = (today - added) / (1000 * 60 * 60 * 24);
+                csv += `${item.category},${item.subcategory},${item.upc},${item.sku},${item.price},${item.dateAdded},${age.toFixed(1)}\n`;
+            });
+
+            csv += "\nCategory Summary\n";
+            csv += "Category,Subcategory,Item Count,Total Value,Average Price\n";
+            const categorySummary = {};
+            inventory.forEach(item => {
+                const key = `${item.category} - ${item.subcategory}`;
+                if (!categorySummary[key]) {
+                    categorySummary[key] = { count: 0, totalValue: 0 };
+                }
+                categorySummary[key].count++;
+                categorySummary[key].totalValue += item.price;
+            });
+
+            for (const [key, data] of Object.entries(categorySummary)) {
+                const avgPrice = (data.totalValue / data.count).toFixed(2);
+                const [cat, sub] = key.split(" - ");
+                csv += `${cat},${sub},${data.count},${data.totalValue.toFixed(2)},${avgPrice}\n`;
+            }
+
+            csv += `\nOverall Inventory Value,$${inventory.reduce((sum, item) => sum + item.price, 0).toFixed(2)}\n`;
+
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'inventory_export.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+
+        // Initialize Summary on Load
+        updateSummary();
+    </script>
+</body>
+</html>
